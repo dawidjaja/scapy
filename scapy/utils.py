@@ -1921,7 +1921,12 @@ class ERFEthernetReader(_SuperSocket):
         self.filename, self.f = self.open(filename)
 
     def _convert_erf_timestamp(self, time):
-        return EDecimal(0)
+        lts = time
+        sec = lts >> 32
+        whole_sec = EDecimal(0xffffffff)
+        frac_sec = EDecimal(lts & 0xffffffff) / whole_sec
+
+        return EDecimal(sec + frac_sec)
 
     def __enter__(self):
         # type: () -> ERFEthernetReader
@@ -1973,7 +1978,7 @@ class ERFEthernetReader(_SuperSocket):
             raise EOFError
 
         # The timestamp is in Intel byte-order
-        time = self._convert_erf_timestamp(struct.unpack( '<Q', hdr[:8] )[0])
+        time = struct.unpack( '<Q', hdr[:8] )[0]
         # The rest is in network byte-order
         type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
         if type != 2:
@@ -2000,7 +2005,7 @@ class ERFEthernetReader(_SuperSocket):
                 import scapy.packet  # noqa: F401
             p = conf.raw_layer(s)
 
-        p.time = time
+        p.time = self._convert_erf_timestamp(time)
 
         return p
 
