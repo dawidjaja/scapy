@@ -1904,6 +1904,110 @@ class PcapWriter(RawPcapWriter):
             caplen=caplen, wirelen=wirelen
         )
 
+@conf.commands.register
+def rderf(filename, count=-1):
+    # type: (Union[IO[bytes], str], int) -> PacketList
+    """Read a ERF file and return a packet list
+
+    :param count: read only <count> packets
+    """
+    with ERFEthernetReader(filename) as fdesc:
+        return fdesc.read_all(count=count)
+
+class ERFEthernetReader(_SuperSocket):
+    
+    def __init__(self, filename):  # type: ignore
+        # type: (str) -> None
+        self.filename, self.f = self.open(filename)
+
+    def _convert_erf_timestamp(self, time):
+        return EDecimal(0)
+
+    def __enter__(self):
+        # type: () -> ERFEthernetReader
+        return self
+    
+    def __exit__(self, exc_type, exc_value, tracback):
+        # type: (Optional[Any], Optional[Any], Optional[Any]) -> None
+        self.f.close()
+
+    @staticmethod
+    def open(fname  # type: Union[IO[bytes], str]
+             ):
+        # type: (...) -> Tuple[str, _ByteStream, bytes]
+        """Open (if necessary) filename"""
+        if isinstance(fname, str):
+            filename = fname
+            try:
+                fdesc = gzip.open(filename, "rb")  # type: _ByteStream
+            except IOError:
+                fdesc = open(filename, "rb")
+        else:
+            fdesc = fname
+            filename = getattr(fdesc, "name", "No name")
+        return filename, fdesc
+
+    def read_all(self, count=-1):
+        # type: (int) -> PacketList
+        res = self._read_all(count)
+        from scapy import plist
+        return plist.PacketList(res, name=os.path.basename(self.filename))
+
+    def _read_all(self, count=-1):
+        # type: (int) -> List[Packet]
+        """return a list of all packets in the ERF file
+        """
+        res = []  # type: List[Packet]
+        while count != 0:
+            count -= 1
+            try:
+                p = self.read_packet()  # type: Packet
+            except EOFError:
+                break
+            res.append(p)
+        return res
+
+    def read_packet(self, size=MTU):
+        hdr = self.f.read(16)
+        if len(hdr) < 16:
+            raise EOFError
+
+        # The timestamp is in Intel byte-order
+        time = self._convert_erf_timestamp(struct.unpack( '<Q', hdr[:8] )[0])
+        # The rest is in network byte-order
+        type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
+        if type != 2:
+            raise Scapy_Exception("Invalid ERF Type (Not TYPE_ETH)")
+
+        s = self.f.read( rlen - 16 )
+        # ERF Ethernet has an extra two bytes of pad between ERF header
+        # and beginning of MAC header so that IP-layer data are DWORD
+        # aligned.  From memory, none of the other types have pad.
+        p = s[2:]
+        # import scapy.layers.l2 as sl
+        from scapy.layers.l2 import Ether
+        try:
+            p = Ether(p)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            if conf.debug_dissector:
+                from scapy.sendrecv import debug
+                debug.crashed_on = (Ether, s)
+                raise
+            if conf.raw_layer is None:
+                # conf.raw_layer is set on import
+                import scapy.packet  # noqa: F401
+            p = conf.raw_layer(s)
+
+        p.time = time
+
+        return p
+
+    def recv(self, size=MTU):
+        # type: (int) -> Packet
+        return self.read_packet(size=size)
+
 
 @conf.commands.register
 def import_hexcap(input_string=None):
