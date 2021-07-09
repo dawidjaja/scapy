@@ -1946,10 +1946,11 @@ class ERFEthernetReader(_SuperSocket):
         """Open (if necessary) filename"""
         if isinstance(fname, str):
             filename = fname
-            try:
+            if filename.endswith(".gz"):
                 fdesc = gzip.open(filename, "rb")  # type: _ByteStream
-            except IOError:
+            else:
                 fdesc = open(filename, "rb")
+
         else:
             fdesc = fname
             filename = getattr(fdesc, "name", "No name")
@@ -2016,6 +2017,7 @@ class ERFEthernetReader(_SuperSocket):
             p = conf.raw_layer(s)
 
         p.time = self._convert_erf_timestamp(time)
+        p.wirelen = wlen
 
         return p
 
@@ -2023,6 +2025,120 @@ class ERFEthernetReader(_SuperSocket):
         # type: (int) -> Packet
         return self.read_packet(size=size)
 
+@conf.commands.register
+def wrerf(filename,  # type: Union[IO[bytes], str]
+           pkt,  # type: _PacketIterable
+           *args,  # type: Any
+           **kargs  # type: Any
+           ):
+    # type: (...) -> None
+    """Write a list of packets to a ERF file
+
+    :param filename: the name of the file to write packets to, or an open,
+        writable file-like object. The file descriptor will be
+        closed at the end of the call, so do not use an object you
+        do not want to close (e.g., running wrerf(sys.stdout, [])
+        in interactive mode will crash Scapy).
+    :param gz: set to 1 to save a gzipped capture
+    :param sync: do not bufferize writes to the capture file
+    """
+    with ERFEthernetWriter(filename, *args, **kargs) as fdesc:
+        fdesc.write(pkt)
+
+class ERFEthernetWriter():
+    """A stream ERF Ethernet writer with more control than wrerf()"""
+
+    def __init__(self,
+                 filename,  # type: Union[IO[bytes], str]
+                 gz=False,  # type: bool
+                 append=False,  # type: bool
+                 sync=False,  # type: bool
+                 ):
+        # type: (...) -> None
+        """
+        :param filename: the name of the file to write packets to, or an open,
+            writable file-like object.
+        :param gz: compress the capture on the fly
+        :param append: append packets to the capture file instead of
+            truncating it
+        :param sync: do not bufferize writes to the capture file
+
+        """
+
+        self.append = append
+        self.gz = gz
+        self.sync = sync
+        bufsz = 4096
+        if sync:
+            bufsz = 0
+
+        if isinstance(filename, str):
+            self.filename = filename
+            if gz:
+                self.f = cast(_ByteStream, gzip.open(
+                    filename, append and "ab" or "wb", 9
+                ))
+            else:
+                self.f = open(filename, append and "ab" or "wb", bufsz)
+        else:
+            self.f = filename
+            self.filename = getattr(filename, "name", "No name")
+
+    def __enter__(self):
+        # type: () -> ERFEthernetWriter
+        return self
+
+    def flush(self):
+        # type: () -> Optional[Any]
+        return self.f.flush()
+
+    def close(self):
+        # type: () -> Optional[Any]
+        return self.f.close()
+
+    def __exit__(self, exc_type, exc_value, tracback):
+        # type: (Optional[Any], Optional[Any], Optional[Any]) -> None
+        self.flush()
+        self.close()
+
+    def write(self, pkt):
+        # type: (Union[_PacketIterable, bytes]) -> None
+        """
+        Writes a Packet, a SndRcvList object, or bytes to a ERF file.
+
+        :param pkt: Packet(s) to write (one record for each Packet), or raw
+                    bytes to write (as one record).
+        :type pkt: iterable[scapy.packet.Packet], scapy.packet.Packet or bytes
+        """
+        if isinstance(pkt, bytes):
+            self.write_packet(pkt)
+        else:
+            # Import here to avoid circular dependency
+            from scapy.supersocket import IterSocket
+            for p in IterSocket(pkt).iter:
+                self.write_packet(p)
+
+    def write_packet(self, pkt):
+        # type: (Optional[Union[Packet, bytes]]) -> None
+
+        if hasattr(pkt, "time"):
+            sec = int(pkt.time)
+            usec = int((int(round((pkt.time - sec) * 1000000000) ) << 32) / 1000000000)
+            t = (sec << 32) + usec
+        else:
+            t = int(time.time()) << 32
+
+        rlen = len(pkt) + 18
+
+        if hasattr(pkt, "wirelen"):
+            wirelen = pkt.wirelen  # type: ignore
+        if wirelen is None:
+            wirelen = rlen
+
+        self.f.write(struct.pack("<Q", t))
+        self.f.write(struct.pack(">BBHHHH", 2, 0, rlen, 0, wirelen, 0))
+        self.f.write(bytes(pkt))
+        self.f.flush()
 
 @conf.commands.register
 def import_hexcap(input_string=None):
