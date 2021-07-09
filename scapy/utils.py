@@ -1924,9 +1924,12 @@ class ERFEthernetReader(_SuperSocket):
         lts = time
         sec = lts >> 32
         whole_sec = EDecimal(0xffffffff)
-        frac_sec = EDecimal(lts & 0xffffffff) / whole_sec
-
-        return EDecimal(sec + frac_sec)
+        frac_sec = lts & 0xffffffff
+        frac_sec *= 10**9
+        frac_sec += (frac_sec & 0x80000000) << 1
+        frac_sec >>= 32
+        power = Decimal(10) ** Decimal(-9)
+        return EDecimal(sec + power * frac_sec)
 
     def __enter__(self):
         # type: () -> ERFEthernetReader
@@ -1973,23 +1976,30 @@ class ERFEthernetReader(_SuperSocket):
         return res
 
     def read_packet(self, size=MTU):
+        # General ERF Header have exactly 16 bytes
         hdr = self.f.read(16)
         if len(hdr) < 16:
             raise EOFError
 
-        # The timestamp is in Intel byte-order
+        # The timestamp is in little-endian byte-order
         time = struct.unpack( '<Q', hdr[:8] )[0]
-        # The rest is in network byte-order
+        # The rest is in big-endian byte-order
         type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
-        if type != 2:
+        # Check if the type != 0x02, type Ethernet
+        if type & 0xFD:
             raise Scapy_Exception("Invalid ERF Type (Not TYPE_ETH)")
 
-        s = self.f.read( rlen - 16 )
-        # ERF Ethernet has an extra two bytes of pad between ERF header
-        # and beginning of MAC header so that IP-layer data are DWORD
-        # aligned.  From memory, none of the other types have pad.
+        # If there are extended headers, ignore it because Packet object does
+        # not support it. Extended headers size is 8 bytes before the payload.
+        if type & 0x80:
+            ext_hdr = self.f.read( 8 )
+            s = self.f.read( rlen - 24 )
+        else:
+            s = self.f.read( rlen - 16 )
+
+        # Ethernet has 2 bytes of padding containing `offset` and `pad`. Both of
+        # the field are disregard by Endace.
         p = s[2:]
-        # import scapy.layers.l2 as sl
         from scapy.layers.l2 import Ether
         try:
             p = Ether(p)

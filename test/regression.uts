@@ -2332,7 +2332,7 @@ erffile = BytesIO(b'3;!E_9\x92_\x02\x04\x00p\x00\x00\x00P\x00\x00\x00\x0fS?\xca\
 
 = Read ERF Ethernet file
 pkterf = rderf(erffile)
-assert abs(EDecimal(pkterf[0].time) - EDecimal(1603418463) - EDecimal(0.270038318)) <= EDecimal(10)**-9
+assert pkterf[0].time == 1603418463.270038318
 assert pkterf[0][IP].src == "10.1.93.219"
 assert pkterf[0][IP].dst == "10.251.57.218"
 assert pkterf[0][Ether].src == "1c:6a:7a:18:90:ed"
