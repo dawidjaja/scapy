@@ -1904,6 +1904,7 @@ class PcapWriter(RawPcapWriter):
             caplen=caplen, wirelen=wirelen
         )
 
+
 @conf.commands.register
 def rderf(filename, count=-1):
     # type: (Union[IO[bytes], str], int) -> PacketList
@@ -1914,8 +1915,9 @@ def rderf(filename, count=-1):
     with ERFEthernetReader(filename) as fdesc:
         return fdesc.read_all(count=count)
 
+
 class ERFEthernetReader(_SuperSocket):
-    
+
     def __init__(self, filename):  # type: ignore
         # type: (str) -> None
         self.filename, self.f = self.open(filename)
@@ -1935,7 +1937,7 @@ class ERFEthernetReader(_SuperSocket):
     def __enter__(self):
         # type: () -> ERFEthernetReader
         return self
-    
+
     def __exit__(self, exc_type, exc_value, tracback):
         # type: (Optional[Any], Optional[Any], Optional[Any]) -> None
         self.f.close()
@@ -1986,11 +1988,11 @@ class ERFEthernetReader(_SuperSocket):
             raise EOFError
 
         # The timestamp is in little-endian byte-order.
-        time = struct.unpack( '<Q', hdr[:8] )[0]
+        time = struct.unpack('<Q', hdr[:8])[0]
         # The rest is in big-endian byte-order.
         # Ignoring flags and lctr (loss counter) since they are ERF specific
-        # header fields which Packet object does not support. 
-        type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
+        # header fields which Packet object does not support.
+        type, flags, rlen, lctr, wlen = struct.unpack('>BBHHH', hdr[8:])
         # Check if the type != 0x02, type Ethernet
         if type & 0x02 == 0:
             raise Scapy_Exception("Invalid ERF Type (Not TYPE_ETH)")
@@ -1998,13 +2000,13 @@ class ERFEthernetReader(_SuperSocket):
         # If there are extended headers, ignore it because Packet object does
         # not support it. Extended headers size is 8 bytes before the payload.
         if type & 0x80:
-            ext_hdr = self.f.read( 8 )
-            s = self.f.read( rlen - 24 )
+            _ = self.f.read(8)
+            s = self.f.read(rlen - 24)
         else:
-            s = self.f.read( rlen - 16 )
+            s = self.f.read(rlen - 16)
 
-        # Ethernet has 2 bytes of padding containing `offset` and `pad`. Both of
-        # the fields are disregarded by Endace.
+        # Ethernet has 2 bytes of padding containing `offset` and `pad`. Both
+        # of the fields are disregarded by Endace.
         p = s[2:size]
         from scapy.layers.l2 import Ether
         try:
@@ -2030,6 +2032,7 @@ class ERFEthernetReader(_SuperSocket):
         # type: (int) -> Packet
         return self.read_packet(size=size)
 
+
 @conf.commands.register
 def wrerf(filename,  # type: Union[IO[bytes], str]
           pkt,  # type: _PacketIterable
@@ -2051,6 +2054,7 @@ def wrerf(filename,  # type: Union[IO[bytes], str]
     """
     with ERFEthernetWriter(filename, *args, **kargs) as fdesc:
         fdesc.write(pkt)
+
 
 class ERFEthernetWriter():
     """A stream ERF Ethernet writer with more control than wrerf()"""
@@ -2125,7 +2129,7 @@ class ERFEthernetWriter():
 
         if hasattr(pkt, "time"):
             sec = int(pkt.time)
-            usec = int((int(round((pkt.time - sec) * 1000000000) ) << 32) / 1000000000)
+            usec = int((int(round((pkt.time - sec) * 10**9)) << 32) / 10**9)
             t = (sec << 32) + usec
         else:
             t = int(time.time()) << 32
@@ -2143,6 +2147,7 @@ class ERFEthernetWriter():
         self.f.write(struct.pack(">BBHHHH", 2, 0, rlen, 0, wirelen, 0))
         self.f.write(bytes(pkt))
         self.f.flush()
+
 
 @conf.commands.register
 def import_hexcap(input_string=None):
