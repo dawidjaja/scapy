@@ -2108,24 +2108,20 @@ class ERFEthernetWriter():
         self.close()
 
     def write(self, pkt):
-        # type: (Union[_PacketIterable, bytes]) -> None
+        # type: (_PacketIterable) -> None
         """
         Writes a Packet, a SndRcvList object, or bytes to a ERF file.
 
-        :param pkt: Packet(s) to write (one record for each Packet), or raw
-                    bytes to write (as one record).
-        :type pkt: iterable[scapy.packet.Packet], scapy.packet.Packet or bytes
+        :param pkt: Packet(s) to write (one record for each Packet)
+        :type pkt: iterable[scapy.packet.Packet], scapy.packet.Packet
         """
-        if isinstance(pkt, bytes):
-            self.write_packet(pkt)
-        else:
-            # Import here to avoid circular dependency
-            from scapy.supersocket import IterSocket
-            for p in IterSocket(pkt).iter:
-                self.write_packet(p)
+        # Import here to avoid circular dependency
+        from scapy.supersocket import IterSocket
+        for p in IterSocket(pkt).iter:
+            self.write_packet(p)
 
     def write_packet(self, pkt):
-        # type: (Optional[Union[Packet, bytes]]) -> None
+        # type: (Optional[Packet]) -> None
 
         if hasattr(pkt, "time"):
             sec = int(pkt.time)
