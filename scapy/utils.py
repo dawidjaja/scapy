@@ -1919,8 +1919,9 @@ class ERFEthernetReader(_SuperSocket):
     def __init__(self, filename):  # type: ignore
         # type: (str) -> None
         self.filename, self.f = self.open(filename)
+        self.power = Decimal(10) ** Decimal(-9)
 
-    # time is in 64-bits Endace's format which could be see here:
+    # time is in 64-bits Endace's format which can be see here:
     # https://www.endace.com/erf-extensible-record-format-types.pdf
     def _convert_erf_timestamp(self, t):
         # type (int) -> EDecimal
@@ -1929,8 +1930,7 @@ class ERFEthernetReader(_SuperSocket):
         frac_sec *= 10**9
         frac_sec += (frac_sec & 0x80000000) << 1
         frac_sec >>= 32
-        power = Decimal(10) ** Decimal(-9)
-        return EDecimal(sec + power * frac_sec)
+        return EDecimal(sec + self.power * frac_sec)
 
     def __enter__(self):
         # type: () -> ERFEthernetReader
@@ -1992,7 +1992,7 @@ class ERFEthernetReader(_SuperSocket):
         # header fields which Packet object does not support. 
         type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
         # Check if the type != 0x02, type Ethernet
-        if type & 0xFD:
+        if type & 0x02 == 0:
             raise Scapy_Exception("Invalid ERF Type (Not TYPE_ETH)")
 
         # If there are extended headers, ignore it because Packet object does
@@ -2004,7 +2004,7 @@ class ERFEthernetReader(_SuperSocket):
             s = self.f.read( rlen - 16 )
 
         # Ethernet has 2 bytes of padding containing `offset` and `pad`. Both of
-        # the field are disregard by Endace.
+        # the fields are disregarded by Endace.
         p = s[2:size]
         from scapy.layers.l2 import Ether
         try:
@@ -2032,10 +2032,10 @@ class ERFEthernetReader(_SuperSocket):
 
 @conf.commands.register
 def wrerf(filename,  # type: Union[IO[bytes], str]
-           pkt,  # type: _PacketIterable
-           *args,  # type: Any
-           **kargs  # type: Any
-           ):
+          pkt,  # type: _PacketIterable
+          *args,  # type: Any
+          **kargs  # type: Any
+          ):
     # type: (...) -> None
     """Write a list of packets to a ERF file
 
