@@ -1920,11 +1920,12 @@ class ERFEthernetReader(_SuperSocket):
         # type: (str) -> None
         self.filename, self.f = self.open(filename)
 
-    def _convert_erf_timestamp(self, time):
-        lts = time
-        sec = lts >> 32
-        whole_sec = EDecimal(0xffffffff)
-        frac_sec = lts & 0xffffffff
+    # time is in 64-bits Endace's format which could be see here:
+    # https://www.endace.com/erf-extensible-record-format-types.pdf
+    def _convert_erf_timestamp(self, t):
+        # type (int) -> EDecimal
+        sec = t >> 32
+        frac_sec = t & 0xffffffff
         frac_sec *= 10**9
         frac_sec += (frac_sec & 0x80000000) << 1
         frac_sec >>= 32
@@ -1977,14 +1978,18 @@ class ERFEthernetReader(_SuperSocket):
         return res
 
     def read_packet(self, size=MTU):
+        # type: (int) -> Packet
+
         # General ERF Header have exactly 16 bytes
         hdr = self.f.read(16)
         if len(hdr) < 16:
             raise EOFError
 
-        # The timestamp is in little-endian byte-order
+        # The timestamp is in little-endian byte-order.
         time = struct.unpack( '<Q', hdr[:8] )[0]
-        # The rest is in big-endian byte-order
+        # The rest is in big-endian byte-order.
+        # Ignoring flags and lctr (loss counter) since they are ERF specific
+        # header fields which Packet object does not support. 
         type, flags, rlen, lctr, wlen = struct.unpack( '>BBHHH', hdr[8:] )
         # Check if the type != 0x02, type Ethernet
         if type & 0xFD:
@@ -2000,7 +2005,7 @@ class ERFEthernetReader(_SuperSocket):
 
         # Ethernet has 2 bytes of padding containing `offset` and `pad`. Both of
         # the field are disregard by Endace.
-        p = s[2:]
+        p = s[2:size]
         from scapy.layers.l2 import Ether
         try:
             p = Ether(p)
@@ -2040,6 +2045,8 @@ def wrerf(filename,  # type: Union[IO[bytes], str]
         do not want to close (e.g., running wrerf(sys.stdout, [])
         in interactive mode will crash Scapy).
     :param gz: set to 1 to save a gzipped capture
+    :param append: append packets to the capture file instead of
+        truncating it
     :param sync: do not bufferize writes to the capture file
     """
     with ERFEthernetWriter(filename, *args, **kargs) as fdesc:
@@ -2062,7 +2069,6 @@ class ERFEthernetWriter():
         :param append: append packets to the capture file instead of
             truncating it
         :param sync: do not bufferize writes to the capture file
-
         """
 
         self.append = append
@@ -2128,6 +2134,8 @@ class ERFEthernetWriter():
         else:
             t = int(time.time()) << 32
 
+        # There are 16 bytes of headers + 2 bytes of padding before the packets
+        # payload.
         rlen = len(pkt) + 18
 
         if hasattr(pkt, "wirelen"):
